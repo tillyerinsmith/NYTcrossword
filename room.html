@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head> 
+    <meta charset="UTF-8">
+    <title>{{ puzzle.title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; gap: 40px; padding: 20px; background-color: #f9f9f9; }
+        .grid { display: grid; grid-template-columns: repeat({{ puzzle.width }}, 32px); grid-template-rows: repeat({{ puzzle.height }}, 32px); gap: 1px; background-color: #000; border: 2px solid #000; }
+        .cell { background-color: #fff; position: relative; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; user-select: none; }
+        .cell.black { background-color: #000; }
+        .number { position: absolute; top: 2px; left: 2px; font-size: 9px; font-weight: normal; color: #333; pointer-events: none; }
+        
+        .clues-container { display: flex; gap: 30px; }
+        .clue-column { width: 260px; max-height: 520px; display: flex; flex-direction: column; }
+        .clue-column h3 { 
+            position: sticky; 
+            top: 0; 
+            background-color: #f9f9f9; 
+            margin: 0 0 8px 0; 
+            padding-bottom: 4px; 
+            border-bottom: 2px solid #333; 
+            z-index: 5; 
+        }
+        .clue-column ul { 
+            overflow-y: auto; 
+            flex-grow: 1; 
+            list-style: none; 
+            padding: 0; 
+            margin: 0; 
+        }
+        
+        li { margin-bottom: 6px; font-size: 14px; line-height: 1.3; padding: 2px 4px; border-radius: 3px; }
+        
+        .cell.selected { background-color: #bce8f1; outline: 2px solid #337ab7; z-index: 10; }
+        .cell input { width: 100%; height: 100%; border: none; background: transparent; text-align: center; font-size: 20px; font-weight: bold; text-transform: uppercase; outline: none; cursor: pointer; }
+        
+        /* Red X overlay for incorrect checks */
+        .wrong-marker { position: absolute; top: 0; left: 0; width: 100%; height: 100%; color: red; font-size: 22px; display: flex; align-items: center; justify-content: center; pointer-events: none; font-weight: bold; z-index: 5; }
+
+        .toolbar { margin-bottom: 15px; display: flex; gap: 10px; }
+        .toolbar button { padding: 6px 12px; font-weight: bold; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+        .toolbar button:hover { background: #eee; }
+
+        .selected-clue { background-color: #bce8f1; font-weight: bold; }
+        .completed-clue { text-decoration: line-through; color: #888; }
+    </style>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.min.js"></script>
+</head>
+
+<body x-data="{ 
+    selectedRow: 0, 
+    selectedCol: 0,
+    direction: 'across',
+    answers: {},
+    errors: {},
+    ws: null,
+    hasCelebrated: false,
+
+    init() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+        this.ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'init_state') {
+                this.answers = data.state;
+            } else {
+                this.answers[data.key] = data.value;
+                delete this.errors[data.key]; // clear error if updated
+            }
+            this.checkCompletion();
+        };
+    },
+    
+    setLetter(r, c, val) {
+        const key = `${r},${c}`;
+        this.answers[key] = val;
+        delete this.errors[key];
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ key: key, value: val }));
+        }
+        this.checkCompletion();
+    },
+
+    checkErrors() {
+        this.errors = {};
+        const solutions = {
+            {% for row in puzzle.grid %}
+                {% set r_idx = loop.index0 %}
+                {% for cell in row %}
+                    {% set c_idx = loop.index0 %}
+                    {% if not cell.is_black %}
+                        '{{ r_idx }},{{ c_idx }}': '{{ cell.solution }}',
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+        };
+
+        for (const [key, correctChar] of Object.entries(solutions)) {
+            const userVal = this.answers[key];
+            if (userVal && userVal.toUpperCase() !== correctChar) {
+                this.errors[key] = true;
+            }
+        }
+    },
+
+    revealPuzzle() {
+        const solutions = {
+            {% for row in puzzle.grid %}
+                {% set r_idx = loop.index0 %}
+                {% for cell in row %}
+                    {% set c_idx = loop.index0 %}
+                    {% if not cell.is_black %}
+                        '{{ r_idx }},{{ c_idx }}': '{{ cell.solution }}',
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+        };
+
+        for (const [key, correctChar] of Object.entries(solutions)) {
+            const [r, c] = key.split(',').map(Number);
+            this.setLetter(r, c, correctChar);
+        }
+    },
+
+    checkCompletion() {
+        let totalCells = 0;
+        let filledCount = 0;
+
+        {% for row in puzzle.grid %}
+            {% set r_idx = loop.index0 %}
+            {% for cell in row %}
+                {% set c_idx = loop.index0 %}
+                {% if not cell.is_black %}
+                    totalCells++;
+                    if (this.answers['{{ r_idx }},{{ c_idx }}'] && this.answers['{{ r_idx }},{{ c_idx }}'].trim() !== '') {
+                        filledCount++;
+                    }
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+
+        if (totalCells > 0 && filledCount === totalCells && !this.hasCelebrated) {
+            this.hasCelebrated = true;
+            this.fireworks();
+        } else if (filledCount < totalCells) {
+            this.hasCelebrated = false;
+        }
+    },
+
+    fireworks() {
+        var duration = 3 * 1000;
+        var end = Date.now() + duration;
+
+        (function frame() {
+            confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 } });
+            confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 } });
+            if (Date.now() < end) { requestAnimationFrame(frame); }
+        }());
+    },
+
+    onCellClick(r, c) {
+        if (this.selectedRow === r && this.selectedCol === c) {
+            this.direction = this.direction === 'across' ? 'down' : 'across';
+        } else {
+            this.selectedRow = r;
+            this.selectedCol = c;
+            this.direction = 'across';
+        }
+        this.focusInput(r, c);
+    },
+
+    navigateTo(r, c) {
+        this.selectedRow = r;
+        this.selectedCol = c;
+        this.focusInput(r, c);
+    },
+
+    focusInput(r, c) {
+        this.$nextTick(() => {
+            const inputEl = document.getElementById(`cell-${r}-${c}`);
+            if (inputEl) inputEl.focus();
+        });
+    },
+
+    handleKeydown(event, r, c) {
+        if (event.key === ' ') {
+            event.preventDefault();
+            this.direction = this.direction === 'across' ? 'down' : 'across';
+        } else if (event.key.length === 1 && event.key.match(/^[a-zA-Z]$/)) {
+            event.preventDefault();
+            this.setLetter(r, c, event.key.toUpperCase());
+            this.moveNext(r, c);
+        } else if (event.key === 'Backspace') {
+            event.preventDefault();
+            if (this.answers[`${r},${c}`]) {
+                this.setLetter(r, c, '');
+            } else {
+                this.movePrev(r, c);
+                this.setLetter(this.selectedRow, this.selectedCol, '');
+            }
+        } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            this.direction = 'across';
+            if (this.selectedCol < {{ puzzle.width - 1 }}) this.navigateTo(r, this.selectedCol + 1);
+        } else if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            this.direction = 'across';
+            if (this.selectedCol > 0) this.navigateTo(r, this.selectedCol - 1);
+        } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            this.direction = 'down';
+            if (this.selectedRow < {{ puzzle.height - 1 }}) this.navigateTo(this.selectedRow + 1, c);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            this.direction = 'down';
+            if (this.selectedRow > 0) this.navigateTo(this.selectedRow - 1, c);
+        }
+    },
+
+    moveNext(r, c) {
+        if (this.direction === 'across') {
+            if (this.selectedCol < {{ puzzle.width - 1 }}) this.navigateTo(r, this.selectedCol + 1);
+        } else {
+            if (this.selectedRow < {{ puzzle.height - 1 }}) this.navigateTo(this.selectedRow + 1, c);
+        }
+    },
+
+    movePrev(r, c) {
+        if (this.direction === 'across') {
+            if (this.selectedCol > 0) this.navigateTo(r, this.selectedCol - 1);
+        } else {
+            if (this.selectedRow > 0) this.navigateTo(this.selectedRow - 1, c);
+        }
+    },
+
+    isAcrossActive(clueNum) {
+        let r = this.selectedRow;
+        let c = this.selectedCol;
+        for (let col = c; col >= 0; col--) {
+            const cellDiv = document.getElementById(`cell-div-${r}-${col}`);
+            if (!cellDiv || cellDiv.classList.contains('black')) break;
+            const numSpan = cellDiv.querySelector('.number');
+            if (numSpan && parseInt(numSpan.innerText) === clueNum) return true;
+        }
+        return false;
+    },
+
+    isDownActive(clueNum) {
+        let r = this.selectedRow;
+        let c = this.selectedCol;
+        for (let row = r; row >= 0; row--) {
+            const cellDiv = document.getElementById(`cell-div-${row}-${c}`);
+            if (!cellDiv || cellDiv.classList.contains('black')) break;
+            const numSpan = cellDiv.querySelector('.number');
+            if (numSpan && parseInt(numSpan.innerText) === clueNum) return true;
+        }
+        return false;
+    },
+
+    isAcrossComplete(clueNum) {
+        let startR = -1, startC = -1;
+        for (let r = 0; r < {{ puzzle.height }}; r++) {
+            for (let c = 0; c < {{ puzzle.width }}; c++) {
+                const numSpan = document.getElementById(`cell-div-${r}-${c}`)?.querySelector('.number');
+                if (numSpan && parseInt(numSpan.innerText) === clueNum) { startR = r; startC = c; break; }
+            }
+            if (startR !== -1) break;
+        }
+        if (startR === -1) return false;
+        for (let c = startC; c < {{ puzzle.width }}; c++) {
+            const cellDiv = document.getElementById(`cell-div-${startR}-${c}`);
+            if (!cellDiv || cellDiv.classList.contains('black')) break;
+            const key = `${startR},${c}`;
+            if (!this.answers[key] || this.answers[key].trim() === '') return false;
+        }
+        return true;
+    },
+
+    isDownComplete(clueNum) {
+        let startR = -1, startC = -1;
+        for (let r = 0; r < {{ puzzle.height }}; r++) {
+            for (let c = 0; c < {{ puzzle.width }}; c++) {
+                const numSpan = document.getElementById(`cell-div-${r}-${c}`)?.querySelector('.number');
+                if (numSpan && parseInt(numSpan.innerText) === clueNum) { startR = r; startC = c; break; }
+            }
+            if (startR !== -1) break;
+        }
+        if (startR === -1) return false;
+        for (let r = startR; r < {{ puzzle.height }}; r++) {
+            const cellDiv = document.getElementById(`cell-div-${r}-${startC}`);
+            if (!cellDiv || cellDiv.classList.contains('black')) break;
+            const key = `${r},${startC}`;
+            if (!this.answers[key] || this.answers[key].trim() === '') return false;
+        }
+        return true;
+    }
+}" x-init="init()">
+    <div>
+        <h2>{{ puzzle.title }}</h2>
+        <p><em>By {{ puzzle.author }}</em></p>
+
+        <!-- Action Toolbar -->
+        <div class="toolbar">
+            <button @click="checkErrors()">Check Puzzle</button>
+            <button @click="revealPuzzle()">Reveal Puzzle</button>
+        </div>
+
+        <!-- Crossword Grid -->
+        <div class="grid">
+            {% for row in puzzle.grid %}
+                {% set r_idx = loop.index0 %}
+                {% for cell in row %}
+                    {% set c_idx = loop.index0 %}
+                    <div id="cell-div-{{ r_idx }}-{{ c_idx }}" 
+                         class="cell {% if cell.is_black %}black{% endif %}"
+                         {% if not cell.is_black %}
+                         @click="onCellClick({{ r_idx }}, {{ c_idx }})"
+                         :class="{ 'selected': selectedRow === {{ r_idx }} && selectedCol === {{ c_idx }} }"
+                         {% endif %}
+                    >
+                        {% if cell.number %}
+                            <span class="number">{{ cell.number }}</span>
+                        {% endif %}
+                        
+                        {% if not cell.is_black %}
+                            <template x-if="errors['{{ r_idx }},{{ c_idx }}']">
+                                <span class="wrong-marker">✕</span>
+                            </template>
+                            <input type="text" maxlength="1" 
+                                   id="cell-{{ r_idx }}-{{ c_idx }}"
+                                   :value="answers['{{ r_idx }},{{ c_idx }}'] || ''"
+                                   @keydown="handleKeydown($event, {{ r_idx }}, {{ c_idx }})"
+                                   @click.stop="onCellClick({{ r_idx }}, {{ c_idx }})" />
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Clues -->
+    <div class="clues-container">
+        <div class="clue-column">
+            <h3>Across</h3>
+            <ul>
+                {% for item in puzzle.clues.across %}
+                    <li :class="{ 'selected-clue': isAcrossActive({{ item.number }}), 'completed-clue': isAcrossComplete({{ item.number }}) }">
+                        <strong>{{ item.number }}.</strong> {{ item.clue }}
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+        <div class="clue-column">
+            <h3>Down</h3>
+            <ul>
+                {% for item in puzzle.clues.down %}
+                    <li :class="{ 'selected-clue': isDownActive({{ item.number }}), 'completed-clue': isDownComplete({{ item.number }}) }">
+                        <strong>{{ item.number }}.</strong> {{ item.clue }}
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
