@@ -149,6 +149,14 @@
     },
 
     fireworks() {
+        // Fallback test to see if the trigger is firing
+        console.log("Fireworks triggered!");
+
+        if (typeof window.confetti !== 'function') {
+            alert("Puzzle completed/revealed! (Confetti script was blocked by the browser)");
+            return;
+        }
+
         var duration = 3 * 1000;
         var end = Date.now() + duration;
 
