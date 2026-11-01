@@ -38,7 +38,27 @@
 
         .toolbar { margin-bottom: 15px; display: flex; gap: 10px; }
         .toolbar button { padding: 6px 12px; font-weight: bold; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
-        .toolbar button:hover { background: #eee; }
+        .toolbar button:hover { background: #eee; }/* Celebration Overlay Banner */
+        
+        .celebration-overlay {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: linear-gradient(135deg, #ff7e5f, #feb47b);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-size: 20px;
+            font-weight: bold;
+            box-shadow: 0px 10px 25px rgba(0,0,0,0.2);
+            z-index: 9999;
+            transition: transform 0.5s ease-in-out;
+            pointer-events: none;
+        }
+        .celebration-overlay.show {
+            transform: translateX(-50%) translateY(0);
+        }
 
         .selected-clue { background-color: #bce8f1; font-weight: bold; }
         .completed-clue { text-decoration: line-through; color: #888; }
@@ -148,22 +168,18 @@
                 },
 
                 fireworks() {
-                    console.log("Fireworks triggered!");
-                    if (typeof window.confetti !== 'function') {
-                        alert("Puzzle completed/revealed!");
-                        return;
+                    console.log("Celebration triggered!");
+                    // This automatically toggles the banner via Alpine's `hasCelebrated` state, 
+                    // and you can also keep the confetti attempt just in case it works!
+                    if (typeof window.confetti === 'function') {
+                        var duration = 3 * 1000;
+                        var end = Date.now() + duration;
+                        (function frame() {
+                            window.confetti({ particleCount: 7, angle: 60, spread: 60, origin: { x: 0 } });
+                            window.confetti({ particleCount: 7, angle: 120, spread: 60, origin: { x: 1 } });
+                            if (Date.now() < end) { requestAnimationFrame(frame); }
+                        }());
                     }
-
-                    var duration = 3 * 1000;
-                    var end = Date.now() + duration;
-
-                    (function frame() {
-                        window.confetti({ particleCount: 7, angle: 60, spread: 60, origin: { x: 0 } });
-                        window.confetti({ particleCount: 7, angle: 120, spread: 60, origin: { x: 1 } });
-                        if (Date.now() < end) { 
-                            requestAnimationFrame(frame); 
-                        }
-                    }());
                 },
 
                 onCellClick(r, c) {
@@ -311,6 +327,9 @@
 </head>
 
 <body x-data="crosswordApp">
+    <div class="celebration-overlay" :class="{ 'show': hasCelebrated }">
+        🎉 Puzzle Completed! Amazing Job! 🎆
+    </div>
     <div>
         <h2>{{ puzzle.title }}</h2>
         <p><em>By {{ puzzle.author }}</em></p>
